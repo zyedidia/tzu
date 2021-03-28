@@ -7,27 +7,53 @@ import (
 	"os"
 	"runtime"
 	"time"
+
+	"github.com/jessevdk/go-flags"
 )
 
 func main() {
 	runtime.LockOSThread()
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	target := os.Args[1]
-	args := os.Args[2:]
+	flagparser := flags.NewParser(&cliopts, flags.PassDoubleDash|flags.PrintErrors)
+	flagparser.Usage = "[OPTIONS] COMMAND [ARGS]"
+	args, err := flagparser.Parse()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
-	SetLogger(log.New(os.Stdout, "", 0))
+	if cliopts.Verbose {
+		SetLogger(log.New(os.Stdout, "INFO: ", 0))
+	}
 
-	prog, pid, err := NewProgram(target, args)
+	if len(args) <= 0 || cliopts.Help {
+		flagparser.WriteHelp(os.Stdout)
+		os.Exit(0)
+	}
+
+	target := args[0]
+	args = args[1:]
+
+	opts := Options{
+		Unpredictability: cliopts.Unpredictability,
+		RandBuf:          MustParseRange(cliopts.ModBytes),
+		RandFp:           MustParseRange(cliopts.OffRange),
+		Wait:             MustParseRange(cliopts.WaitRange),
+		IOStrategies:     []Strategy{StratSilence, StratRandBuf, StratRandOff},
+	}
+
+	prog, _, err := NewProgram(target, args, opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(pid)
-
 	var s Status
 	for {
 		p, err := prog.Wait(&s)
+		if err == ErrFinishedTrace {
+			break
+		}
 		if err != nil {
 			log.Fatal(err)
 		}

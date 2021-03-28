@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -29,9 +28,10 @@ type Proc struct {
 	exited bool
 	stack  *FuncStack
 	fds    map[int]string
+	opts   *Options
 }
 
-func startProc(target string, args []string) (*Proc, error) {
+func startProc(target string, args []string, opts *Options) (*Proc, error) {
 	cmd := exec.Command(target, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -51,7 +51,7 @@ func startProc(target string, args []string) (*Proc, error) {
 		unix.PTRACE_O_TRACEFORK | unix.PTRACE_O_TRACEVFORK |
 		unix.PTRACE_O_TRACESYSGOOD | unix.PTRACE_O_TRACEEXIT
 
-	p, err := newTracedProc(cmd.Process.Pid)
+	p, err := newTracedProc(cmd.Process.Pid, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +76,12 @@ func startProc(target string, args []string) (*Proc, error) {
 }
 
 // Begins tracing an already existing process
-func newTracedProc(pid int) (*Proc, error) {
+func newTracedProc(pid int, opts *Options) (*Proc, error) {
 	p := &Proc{
 		tracer: ptrace.NewTracer(pid),
 		stack:  NewStack(),
 		fds:    make(map[int]string),
+		opts:   opts,
 	}
 
 	return p, nil
@@ -108,32 +109,9 @@ func (p *Proc) handleInterrupt() error {
 	return nil
 }
 
-type strat int
-
-const (
-	stratSilence strat = iota
-	stratRandBuf
-	stratRandOff
-)
-
-func (s strat) String() string {
-	switch s {
-	case stratSilence:
-		return "silence"
-	case stratRandBuf:
-		return "randomize buffer"
-	case stratRandOff:
-		return "randomize file offset"
-	}
-	return ""
-}
-
-const unpredictability = 0
-
-func modifyBuf(data []byte) []byte {
+func modifyBuf(data []byte, nrand int) []byte {
 	// randomize 10 bytes
-	const nbytes = 10
-	for n := 0; n < nbytes; n++ {
+	for n := 0; n < nrand; n++ {
 		i := rand.Intn(len(data))
 		b := byte(rand.Intn(256))
 		data[i] = b
@@ -170,9 +148,9 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 		}, nil
 	}
 
-	sample := rand.Intn(100)
-	if sample >= unpredictability {
-		// we are only unpredictable if the sample is below the threshold.
+	sample := rand.Float64()
+	if sample >= p.opts.Unpredictability {
+		// we are unpredictable only if the sample is below the threshold.
 		return nil, nil
 	}
 
@@ -185,7 +163,8 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, nil
 		}
 
-		strategy := strat(rand.Intn(3))
+		// pick random strategy
+		strategy := p.opts.IOStrategies[rand.Intn(len(p.opts.IOStrategies))]
 
 		op := "write"
 		if regs.Orig_rax == unix.SYS_READ {
@@ -195,36 +174,32 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 		logger.Printf("Reading/writing: %s\n", p.fds[int(regs.Rdi)])
 
 		switch strategy {
-		case stratSilence:
+		case StratSilence:
 			// read no bytes
 			return p.SyscallSilence(&regs, regs.Rdx), nil
-		case stratRandBuf:
+		case StratRandBuf:
 			return nil, p.SyscallChangeBuf(&regs)
-		case stratRandOff:
-			return p.SyscallSeek(&regs, int(regs.Rdi), -10, 10), nil
+		case StratRandOff:
+			return p.SyscallSeek(&regs, int(regs.Rdi)), nil
 		}
 	case unix.SYS_SENDMSG:
 	case unix.SYS_RECVMSG:
 	case unix.SYS_NANOSLEEP:
 		// strategy 3: increase wait time
 		t := time.Duration(rand.Intn(int(1 * time.Millisecond)))
-		log.Printf("sleeping an additional %v\n", t)
+		logger.Printf("sleeping an additional %v\n", t)
 		time.Sleep(t)
 	}
 	return nil, nil
 }
 
-func randrange(min, max int) int {
-	return rand.Intn(max-min) + min
-}
-
-func (p *Proc) SyscallSeek(regs *unix.PtraceRegs, fd int, min, max int) ExitFunc {
+func (p *Proc) SyscallSeek(regs *unix.PtraceRegs, fd int) ExitFunc {
 	origRegs := *regs
 	newregs := unix.PtraceRegs{
 		Orig_rax: unix.SYS_LSEEK,
 		Rax:      unix.SYS_LSEEK,
 		Rdi:      uint64(fd),
-		Rsi:      uint64(randrange(min, max)),
+		Rsi:      uint64(p.opts.RandFp.Get()),
 		Rdx:      uint64(os.SEEK_CUR),
 		R10:      0,
 		R8:       0,
@@ -265,7 +240,7 @@ func (p *Proc) SyscallChangeBuf(regs *unix.PtraceRegs) error {
 	if n != int(length) {
 		return errors.New("unable to read entire buffer")
 	}
-	data = modifyBuf(data)
+	data = modifyBuf(data, p.opts.RandBuf.Get())
 	// use PokeData so we are guaranteed to have permissions
 	p.tracer.PokeData(uintptr(buf), data)
 	regs.Rdx = uint64(len(data))

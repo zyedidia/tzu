@@ -8,7 +8,6 @@ import (
 
 var ErrFinishedTrace = errors.New("tracing finished")
 
-// Status represents a return status from a call to Wait.
 type Status struct {
 	unix.WaitStatus
 
@@ -18,15 +17,18 @@ type Status struct {
 
 type Program struct {
 	procs map[int]*Proc
+	opts  Options
 }
 
-func NewProgram(target string, args []string) (*Program, int, error) {
-	proc, err := startProc(target, args)
+func NewProgram(target string, args []string, opts Options) (*Program, int, error) {
+	prog := new(Program)
+	prog.opts = opts
+
+	proc, err := startProc(target, args, &prog.opts)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	prog := new(Program)
 	prog.procs = map[int]*Proc{
 		proc.Pid(): proc,
 	}
@@ -46,7 +48,7 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 	status.groupStop = false
 	proc, ok := p.procs[wpid]
 	if !ok {
-		proc, err = newTracedProc(wpid)
+		proc, err = newTracedProc(wpid, &p.opts)
 		if err != nil {
 			return nil, err
 		}
@@ -91,8 +93,7 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 		delete(p.procs, wpid)
 		proc.exit()
 	} else {
-		// status.sig = ws.StopSignal()
-		logger.Printf("%d: other signal?: %v\n", wpid, status.sig)
+		logger.Printf("%d: trapped for unknown reason, continuing\n", wpid)
 	}
 	return proc, nil
 }
