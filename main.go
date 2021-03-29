@@ -15,7 +15,7 @@ func main() {
 	runtime.LockOSThread()
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	flagparser := flags.NewParser(&cliopts, flags.PassDoubleDash|flags.PrintErrors)
+	flagparser := flags.NewParser(&cliopts, flags.PassDoubleDash|flags.PrintErrors|flags.PassAfterNonOption)
 	flagparser.Usage = "[OPTIONS] COMMAND [ARGS]"
 	args, err := flagparser.Parse()
 	if err != nil {
