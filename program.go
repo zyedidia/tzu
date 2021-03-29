@@ -69,9 +69,6 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 		logger.Printf("%d: not stopped?\n", wpid)
 		return proc, nil
 	} else if ws.StopSignal() == (unix.SIGTRAP | 0x80) {
-		// var regs unix.PtraceRegs
-		// proc.tracer.GetRegs(&regs)
-		// logger.Printf("%d: syscall %d\n", wpid, regs.Orig_rax)
 		proc.handleInterrupt()
 	} else if ws.StopSignal() != unix.SIGTRAP {
 		if statusPtraceEventStop(*ws) {

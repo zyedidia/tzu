@@ -110,7 +110,7 @@ func (p *Proc) handleInterrupt() error {
 }
 
 func modifyBuf(data []byte, nrand int) []byte {
-	// randomize 10 bytes
+	// randomize nrand bytes
 	for n := 0; n < nrand; n++ {
 		i := rand.Intn(len(data))
 		b := byte(rand.Intn(256))
