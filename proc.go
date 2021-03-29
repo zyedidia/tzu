@@ -191,6 +191,7 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return p.SyscallSeek(&regs, int(regs.Rdi)), nil
 		}
 	case unix.SYS_SENDTO, unix.SYS_RECVFROM:
+		logger.Printf("Changing buffer in sendto/recvfrom")
 		err := p.SyscallChangeBuf(regs.Rsi, regs.Rdx, &regs.Rdx)
 		p.tracer.SetRegs(&regs)
 		return nil, err
@@ -240,6 +241,11 @@ func (p *Proc) SyscallBlock(regs *unix.PtraceRegs) ExitFunc {
 }
 
 func (p *Proc) SyscallChangeBuf(buf, length uint64, modlen *uint64) error {
+	if buf == 0 {
+		// buffer is null?
+		return nil
+	}
+
 	data := make([]byte, length)
 	n, err := p.tracer.ReadVM(uintptr(buf), data)
 	if err != nil {

@@ -89,11 +89,11 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_VFORK {
 		logger.Printf("%d: called vfork()\n", wpid)
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_EXEC {
+		logger.Printf("%d: called execve()\n", wpid)
+	} else if ws.TrapCause() == unix.PTRACE_EVENT_EXIT {
 		logger.Printf("%d: called exit()\n", wpid)
-		delete(p.procs, wpid)
-		proc.exit()
 	} else {
-		logger.Printf("%d: trapped for unknown reason, continuing\n", wpid)
+		logger.Printf("%d: trapped, continuing\n", wpid)
 	}
 	return proc, nil
 }
