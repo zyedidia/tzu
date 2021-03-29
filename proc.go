@@ -124,6 +124,12 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 	p.tracer.GetRegs(&regs)
 
 	switch regs.Orig_rax {
+	case unix.SYS_CLOSE:
+		fd := int(regs.Rdi)
+		if _, ok := p.fds[fd]; ok {
+			delete(p.fds, fd)
+			return nil, nil
+		}
 	case unix.SYS_OPEN, unix.SYS_OPENAT:
 		var path string
 		var err error
@@ -178,15 +184,19 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			// read no bytes
 			return p.SyscallSilence(&regs, regs.Rdx), nil
 		case StratRandBuf:
-			return nil, p.SyscallChangeBuf(&regs)
+			err := p.SyscallChangeBuf(regs.Rsi, regs.Rdx, &regs.Rdx)
+			p.tracer.SetRegs(&regs)
+			return nil, err
 		case StratRandOff:
 			return p.SyscallSeek(&regs, int(regs.Rdi)), nil
 		}
-	case unix.SYS_SENDMSG:
-	case unix.SYS_RECVMSG:
+	case unix.SYS_SENDTO, unix.SYS_RECVFROM:
+		err := p.SyscallChangeBuf(regs.Rsi, regs.Rdx, &regs.Rdx)
+		p.tracer.SetRegs(&regs)
+		return nil, err
 	case unix.SYS_NANOSLEEP:
 		// strategy 3: increase wait time
-		t := time.Duration(rand.Intn(int(1 * time.Millisecond)))
+		t := time.Duration(time.Duration(p.opts.Wait.Get()) * time.Microsecond)
 		logger.Printf("sleeping an additional %v\n", t)
 		time.Sleep(t)
 	}
@@ -229,9 +239,7 @@ func (p *Proc) SyscallBlock(regs *unix.PtraceRegs) ExitFunc {
 	}
 }
 
-func (p *Proc) SyscallChangeBuf(regs *unix.PtraceRegs) error {
-	buf := regs.Rsi
-	length := regs.Rdx
+func (p *Proc) SyscallChangeBuf(buf, length uint64, modlen *uint64) error {
 	data := make([]byte, length)
 	n, err := p.tracer.ReadVM(uintptr(buf), data)
 	if err != nil {
@@ -243,8 +251,7 @@ func (p *Proc) SyscallChangeBuf(regs *unix.PtraceRegs) error {
 	data = modifyBuf(data, p.opts.RandBuf.Get())
 	// use PokeData so we are guaranteed to have permissions
 	p.tracer.PokeData(uintptr(buf), data)
-	regs.Rdx = uint64(len(data))
-	p.tracer.SetRegs(regs)
+	*modlen = uint64(len(data))
 	return nil
 }
 
