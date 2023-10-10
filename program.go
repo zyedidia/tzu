@@ -48,10 +48,7 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 	status.groupStop = false
 	proc, ok := p.procs[wpid]
 	if !ok {
-		proc, err = newTracedProc(wpid, &p.opts)
-		if err != nil {
-			return nil, err
-		}
+		proc = newTracedProc(wpid, &p.opts)
 		p.procs[wpid] = proc
 		logger.Printf("%d: new process created (tracing enabled)\n", wpid)
 		return proc, nil

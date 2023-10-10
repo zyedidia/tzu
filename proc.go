@@ -51,24 +51,8 @@ func startProc(target string, args []string, opts *Options) (*Proc, error) {
 		unix.PTRACE_O_TRACEFORK | unix.PTRACE_O_TRACEVFORK |
 		unix.PTRACE_O_TRACESYSGOOD | unix.PTRACE_O_TRACEEXIT
 
-	p, err := newTracedProc(cmd.Process.Pid, opts)
-	if err != nil {
-		return nil, err
-	}
-	err = p.tracer.ReAttachAndContinue(options)
-	if err != nil {
-		return nil, err
-	}
-
-	// Wait for the initial SIGTRAP created because we are attaching
-	// with ReAttachAndContinue to properly handle group stops.
-	var ws unix.WaitStatus
-	_, err = unix.Wait4(p.tracer.Pid(), &ws, 0, nil)
-	if err != nil {
-		return nil, err
-	} else if ws.StopSignal() != unix.SIGTRAP {
-		return nil, errors.New("wait: received non SIGTRAP: " + ws.StopSignal().String())
-	}
+	p := newTracedProc(cmd.Process.Pid, opts)
+	p.tracer.SetOptions(options)
 	err = p.cont(0, false)
 
 	return p, err
@@ -76,7 +60,7 @@ func startProc(target string, args []string, opts *Options) (*Proc, error) {
 }
 
 // Begins tracing an already existing process
-func newTracedProc(pid int, opts *Options) (*Proc, error) {
+func newTracedProc(pid int, opts *Options) *Proc {
 	p := &Proc{
 		tracer: ptrace.NewTracer(pid),
 		stack:  NewStack(),
@@ -84,7 +68,7 @@ func newTracedProc(pid int, opts *Options) (*Proc, error) {
 		opts:   opts,
 	}
 
-	return p, nil
+	return p
 }
 
 func (p *Proc) handleInterrupt() error {
